@@ -1,0 +1,380 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Planner Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* Mise en page : colonne de réglages à gauche, carte schématique + métré à droite ; une colonne sur téléphone */
+:root{
+  --bg:#f4f6f5; --panel:#ffffff; --ink:#18231f; --muted:#5d6b66; --line:#d9e0dd; --accent:#0e7c66; --accent-ink:#ffffff;
+  --feeder:#c2255c; --dist:#d98e04; --drop:#2f7fd1; --casse:#d93b3b; --terre:#9a7650; --road:#c3ccc8; --canvas:#eef2f0;
+  --ok:#1f8f4e; --bad:#c92a2a;
+  --font-d:"Space Grotesk",system-ui,sans-serif; --font-b:Inter,system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1714; --panel:#17211d; --ink:#e6eeea; --muted:#9aaba4; --line:#2a3832; --accent:#3cc4a4; --accent-ink:#06201a;
+  --feeder:#f06595; --dist:#f2b134; --drop:#5ba8f0; --casse:#ff6b6b; --terre:#c4a07a; --road:#3a4742; --canvas:#101a16; --ok:#4cc582; --bad:#ff7b7b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1714; --panel:#17211d; --ink:#e6eeea; --muted:#9aaba4; --line:#2a3832; --accent:#3cc4a4; --accent-ink:#06201a;
+  --feeder:#f06595; --dist:#f2b134; --drop:#5ba8f0; --casse:#ff6b6b; --terre:#c4a07a; --road:#3a4742; --canvas:#101a16; --ok:#4cc582; --bad:#ff7b7b; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-b);font-size:14px;line-height:1.5;
+  padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font:700 26px/1.15 var(--font-d);margin:0 0 4px;text-wrap:balance}
+h2{font:600 15px/1.2 var(--font-d);margin:0 0 10px;letter-spacing:.02em}
+.sub{color:var(--muted);margin:0 0 18px;max-width:70ch}
+.wrap{display:grid;grid-template-columns:320px minmax(0,1fr);gap:16px;max-width:1280px;margin:auto}
+@media(max-width:860px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+label{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-top:10px}
+label b{font-variant-numeric:tabular-nums;font-weight:600}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+select,input[type=number]{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+button{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:9px 12px;font:600 13px var(--font-b);cursor:pointer;width:100%;margin-top:12px}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{border-left:3px solid var(--accent);padding:2px 0 2px 10px;min-width:0}
+.kpi small{display:block;color:var(--muted);font-size:12px}
+.kpi strong{font:700 20px var(--font-d);font-variant-numeric:tabular-nums}
+.kpi span{display:block;color:var(--muted);font-size:12px}
+canvas{width:100%;height:auto;aspect-ratio:1.45;background:var(--canvas);border-radius:8px;display:block;max-height:560px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+th{color:var(--muted);font-weight:500;font-size:12px}
+td input{width:84px;text-align:right;padding:3px 6px}
+.bars{display:flex;height:22px;border-radius:5px;overflow:hidden;gap:2px;margin:8px 0}
+.bars div{min-width:2px}
+.note{color:var(--muted);font-size:12px;margin:8px 0 0}
+.status{font-weight:600}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:0;padding:0;list-style:none}
+.how li{font-size:13px;color:var(--muted)}.how b{display:block;color:var(--ink);margin-bottom:2px}
+
+[hidden]{display:none!important}
+#map{height:min(64vh,620px);min-height:380px;border-radius:8px;background:var(--canvas);z-index:0}
+.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tab{width:auto;margin:0;background:transparent;color:var(--ink);border:1px solid var(--line)}
+.tab[aria-selected=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+input[type=text]{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+.chk{display:flex;gap:8px;align-items:center;justify-content:flex-start;margin-top:10px}
+.chk input{width:auto}
+.rb{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px}
+.rb span:nth-child(even){text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+</style></head><body>
+<h1>AI Planner Map</h1>
+<p class="sub">Dimensionnement radio 4G/5G/6G et FTTH avec génie civil, sur imagerie satellite réelle (Esri World Imagery). Fichier autonome : ouvrez-le dans un navigateur connecté à internet. Cliquez sur la carte pour déplacer le centre.</p>
+<div class="wrap">
+<div class="col">
+ <div class="panel"><h2>Emplacement</h2>
+  <div class="row2"><div><label>Latitude</label><input id="lat" type="number" step="0.001" value="34.425"></div><div><label>Longitude</label><input id="lon" type="number" step="0.001" value="8.784"></div></div>
+  <label class="chk"><input id="clk" type="checkbox" checked> un clic sur la carte déplace le centre</label>
+  <p class="note">Centre par défaut : Gafsa.</p></div>
+ <div class="panel radio"><h2>Radio : paramètres</h2>
+  <label>Technologie</label><select id="tech"></select>
+  <label>Environnement</label><select id="env"></select>
+  <label>Couverture visée</label><select id="cov"></select>
+  <label>Rayon de la zone <b id="vRr"></b></label><input id="Rr" type="range" min="1" max="15" step="0.5" value="4">
+  <label>Population (hab/km²) <b id="vpop"></b></label><input id="pop" type="range" min="20" max="10000" step="20" value="3000">
+  <label>Part de marché <b id="vms"></b></label><input id="ms" type="range" min="5" max="80" step="5" value="40">
+  <label>Trafic (Go/mois/abonné) <b id="vgb"></b></label><input id="gb" type="range" min="5" max="150" step="5" value="40">
+  <button id="goR">Calculer et placer les sites</button></div>
+ <div class="panel ftth"><h2>FTTH : zone et réseau</h2>
+  <label class="chk"><input id="useOsm" type="checkbox" checked> routes et bâtiments OpenStreetMap (en ligne)</label>
+  <label>Rayon de la zone <b id="vR"></b></label><input id="R" type="range" min="400" max="1600" step="100" value="900">
+  <label>Foyers par km² (si hors OSM) <b id="vD"></b></label><input id="D" type="range" min="100" max="1500" step="50" value="500">
+  <div class="row2"><div><label>Foyers / NAP</label><select id="cap"><option>4</option><option selected>8</option><option>16</option></select></div>
+  <div><label>NAP / FDH</label><select id="fdhn"><option>2</option><option selected>4</option><option>8</option></select></div></div>
+  <label>Graine (rues fictives) <b id="vS"></b></label><input id="S" type="range" min="1" max="50" value="7">
+  <button id="gen">Générer le réseau FTTH</button><p class="note" id="status"></p></div>
+ <div class="panel ftth"><h2>Hypothèses de génie civil</h2>
+  <label>Terrain rocheux <b id="vrock"></b></label><input id="rock" type="range" min="0" max="100" step="5" value="10">
+  <label>Branchement en aérien <b id="vaer"></b></label><input id="aer" type="range" min="0" max="100" step="5" value="0">
+  <label>Sous trottoir : transport <b id="vsw0"></b></label><input id="sw0" type="range" min="0" max="100" step="5" value="30">
+  <label>Sous trottoir : distribution <b id="vsw1"></b></label><input id="sw1" type="range" min="0" max="100" step="5" value="50">
+  <label>Sous trottoir : branchement <b id="vsw2"></b></label><input id="sw2" type="range" min="0" max="100" step="5" value="80">
+  <div class="row2"><div><label>Chambre tous les (m)</label><input id="chs" type="number" value="150" min="50" max="500" step="10"></div>
+  <div><label>Traversées / km</label><input id="crs" type="number" value="2" min="0" max="10" step="0.5"></div>
+  <div><label>Aléas (%)</label><input id="cont" type="number" value="10" min="0" max="40"></div>
+  <div><label>Études (%)</label><input id="stud" type="number" value="6" min="0" max="30"></div></div></div>
+</div>
+<div class="col">
+ <div class="panel"><div class="tabs" role="tablist"><button class="tab" id="tR" role="tab" aria-selected="true">Radio 4G / 5G / 6G</button><button class="tab" id="tF" role="tab" aria-selected="false">FTTH et génie civil</button></div>
+  <div id="map" role="application" aria-label="Carte satellite"></div>
+  <div class="legend radio" id="legR"><span><i style="background:#ffd43b"></i>Site (rayon de cellule)</span><span><i style="background:#fff"></i>Zone étudiée</span></div>
+  <div class="legend ftth"><span><i style="background:var(--feeder)"></i>Transport OLT→FDH</span><span><i style="background:var(--dist)"></i>Distribution FDH→NAP</span><span><i style="background:var(--drop)"></i>Branchement</span>
+  <label style="margin:0;display:inline-flex;gap:6px"><input id="showC" type="checkbox" checked> casses en rouge (tranchée revêtue)</label></div></div>
+ <div class="panel radio"><h2>Dimensionnement radio</h2><div class="kpis" id="rk"></div><div class="rb" id="rb" style="margin-top:12px"></div>
+  <p class="note" id="rnote"></p></div>
+ <div class="panel ftth"><div class="kpis" id="kpis"></div><p id="optic" class="note"></p></div>
+ <div class="panel ftth"><h2>Tranchées par niveau</h2><div class="scroll"><table id="lvl"></table></div></div>
+ <div class="panel ftth"><h2>Bordereau et métré (prix modifiables)</h2><div class="bars" id="bars"></div><div class="scroll"><table id="boq"></table></div>
+  <p class="note">Prix par défaut : ordres de grandeur d'avant-projet, à remplacer par votre BPU. Données routières © contributeurs OpenStreetMap (ODbL) ; imagerie © Esri et ses fournisseurs : vérifiez les conditions d'usage pour un emploi commercial.</p>
+  <button class="ghost" id="reset">Remettre les prix par défaut</button></div>
+</div></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const DEF = [
+ ["demolition_chaussee","Démolition de chaussée","m²",14],["demolition_trottoir","Démolition de trottoir","m²",11],
+ ["fouille_terrain","Fouille terrain meuble","m³",16],["fouille_rocheuse","Fouille terrain rocheux","m³",70],
+ ["lit_sable","Lit de pose et enrobage sable","m³",38],["remblai","Remblai compacté","m³",14],["evacuation","Évacuation des déblais","m³",12],
+ ["reprise_chaussee","Réfection de chaussée","m²",48],["reprise_trottoir","Réfection de trottoir","m²",38],
+ ["conduit_pehd","Conduit PEHD Ø40/33","ml",4.5],["grillage","Grillage avertisseur","ml",0.8],
+ ["chambre_l1t","Chambre L1T (NAP)","u",180],["chambre_l2t","Chambre L2T (FDH, distribution)","u",420],
+ ["forage_dirige","Forage dirigé","ml",85],["poteau","Poteau aérien","u",260],["cable_aerien_pose","Pose câble aérien","ml",6],
+ ["signalisation","Signalisation de chantier","km",1200]];
+const prices = {}; const resetPrices = () => DEF.forEach(d => prices[d[0]] = d[3]); resetPrices();
+const LV = ["feeder","dist","drop"], LVN = {feeder:"Transport", dist:"Distribution", drop:"Branchement"};
+const W = {feeder:.45, dist:.40, drop:.30}, H = {feeder:1.0, dist:.9, drop:.6}, DUCT = {feeder:2, dist:2, drop:1};
+const fmt = (x, d=0) => x.toLocaleString("fr-FR", {maximumFractionDigits:d, minimumFractionDigits:d});
+
+function rng(seed){ let s = seed >>> 0; return () => (s = (Math.imul(s,1664525) + 1013904223) >>> 0) / 4294967296; }
+
+
+const RE = 6371008.8;
+let CENTER = {lat:34.425, lon:8.784};
+const toXY = (la,lo)=>[RE*Math.cos(CENTER.lat*Math.PI/180)*(lo-CENTER.lon)*Math.PI/180, RE*(la-CENTER.lat)*Math.PI/180];
+const toLL = (x,y)=>[CENTER.lat+y/RE*180/Math.PI, CENTER.lon+x/(RE*Math.cos(CENTER.lat*Math.PI/180))*180/Math.PI];
+
+/* ---------- carte ---------- */
+const map = L.map("map",{preferCanvas:true}).setView([CENTER.lat,CENTER.lon],14);
+const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Imagerie © Esri, Maxar, Earthstar Geographics"}).addTo(map);
+const osmT = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© contributeurs OpenStreetMap"});
+L.control.layers({"Satellite (Esri)":sat,"Plan (OSM)":osmT},null,{collapsed:true}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+let mode = "radio";
+
+function fitZone(R){ const a=toLL(-R,-R), b=toLL(R,R); map.fitBounds([a,b]); }
+/* ---------- radio ---------- */
+const TECHS = {
+ "4G LTE (1800 MHz)":{f:1.8,bw:20,ptx:46,g:17,nf:7,sinr:0,se:2,gb:15,capex:60000},
+ "5G NR (3,5 GHz)":{f:3.5,bw:100,ptx:53,g:25,nf:7,sinr:2,se:8,gb:40,capex:90000},
+ "5G mmWave (26 GHz)":{f:26,bw:400,ptx:40,g:30,nf:9,sinr:2,se:4.5,gb:60,capex:45000},
+ "6G FR3 (13 GHz), prospectif":{f:13,bw:400,ptx:50,g:30,nf:8,sinr:2,se:12,gb:100,capex:100000}};
+const ENVS = {"Urbain dense":[5,8000],"Urbain":[0,3000],"Suburbain":[-8,800],"Rural":[-16,60]};
+const COVS = {"Extérieur":0,"Véhicule":8,"Indoor léger":15,"Indoor profond":22};
+const pathLoss=(d,f,off)=>{const d3=Math.max(Math.hypot(d,23.5),10), l=28+22*Math.log10(d3)+20*Math.log10(f), n=13.54+39.08*Math.log10(d3)+20*Math.log10(f);return Math.max(l,n)+off;};
+function radioDim(tech,env,cov,areaKm2,pop,ms,gb){
+  const t=TECHS[tech], eirp=t.ptx+t.g, sens=-174+10*Math.log10(t.bw*1e6)+t.nf+t.sinr;
+  const pen=COVS[cov]+(t.f>3.5&&COVS[cov]>0?2*Math.log2(t.f/3.5):0), maxPl=eirp-sens-pen-7;
+  let lo=10,hi=60000; for(let i=0;i<60;i++){const m=(lo+hi)/2; pathLoss(m,t.f,ENVS[env][0])<=maxPl?lo=m:hi=m;}
+  const Rc=lo, siteArea=1.949*(Rc/1000)**2, nCov=Math.max(1,Math.ceil(areaKm2/siteArea));
+  const subs=pop*areaKm2*ms, mbps=gb*8000*.07/30/3600, demand=subs*mbps, capSite=3*t.bw*t.se*.7, nCap=Math.max(1,Math.ceil(demand/capSite));
+  return {Rc,siteArea,nCov,nCap,n:Math.max(nCov,nCap),limit:nCov>=nCap?"Couverture":"Capacité",subs,demand,capSite,eirp,sens,pen,maxPl,capex:t.capex};
+}
+function hexSites(radius,n){
+  const isd=Math.sqrt(2*Math.PI*radius**2/(Math.sqrt(3)*Math.max(n,1))), dy=isd*Math.sqrt(3)/2, lim=radius+isd/Math.sqrt(3), pts=[], k=Math.ceil(lim/dy)+1;
+  for(let j=-k;j<=k;j++) for(let i=-k;i<=k;i++){const x=(i+(j&1?.5:0))*isd, y=j*dy; if(Math.hypot(x,y)<=lim) pts.push([x,y]);}
+  return pts;
+}
+function runRadio(){
+  const tech=$("tech").value, env=$("env").value, cov=$("cov").value, Rk=+$("Rr").value, area=Math.PI*Rk*Rk;
+  const r=radioDim(tech,env,cov,area,+$("pop").value,+$("ms").value/100,+$("gb").value), sites=hexSites(Rk*1000,r.n);
+  layer.clearLayers();
+  L.circle([CENTER.lat,CENTER.lon],{radius:Rk*1000,color:"#fff",weight:2,fill:false}).addTo(layer);
+  const drawR=Math.min(r.Rc,2500);
+  sites.forEach((s,i)=>{const ll=toLL(s[0],s[1]);
+    L.circle(ll,{radius:drawR,color:"#ffd43b",weight:1,fillColor:"#ffd43b",fillOpacity:.12}).addTo(layer);
+    L.circleMarker(ll,{radius:4,color:"#fff",weight:1,fillColor:"#e8590c",fillOpacity:1}).bindTooltip("Site "+(i+1)).addTo(layer);});
+  fitZone(Rk*1000);
+  const k=(a,b,c)=>`<div class="kpi"><small>${a}</small><strong>${b}</strong><span>${c}</span></div>`;
+  $("rk").innerHTML=k("Sites nécessaires",r.n,`couverture ${r.nCov} · capacité ${r.nCap}`)+k("Facteur limitant",r.limit,"")+k("Rayon de cellule",fmt(r.Rc/1000,2)+" km",`${fmt(r.siteArea,2)} km² par site`)+
+    k("Sites placés",sites.length,"avec les sites de bordure")+k("CAPEX indicatif",fmt(sites.length*r.capex/1e6,2)+" M$",`${fmt(r.capex/1000)} k$ par site`);
+  $("rb").innerHTML=[["EIRP",fmt(r.eirp,0)+" dBm"],["Sensibilité (bruit + SINR)",fmt(r.sens,1)+" dBm"],["Pénétration",fmt(r.pen,1)+" dB"],
+    ["Marge de fading","7 dB"],["Affaiblissement admissible",fmt(r.maxPl,1)+" dB"],["Abonnés",fmt(r.subs)],["Demande heure chargée",fmt(r.demand)+" Mbit/s"],["Capacité d'un site",fmt(r.capSite)+" Mbit/s"]]
+    .map(x=>`<span>${x[0]}</span><span>${x[1]}</span>`).join("");
+  $("rnote").textContent=(tech.includes("6G")?"6G : hypothèses prospectives (IMT-2030), non normalisées. ":"")+(r.Rc>2500?"Cercles de cellule tracés à 2,5 km maximum. ":"")+"Modèle UMa 38.901 simplifié, terrain homogène, sans relief ni interférences.";
+}
+
+/* ---------- routes OSM ---------- */
+const UNPAVED=new Set(["unpaved","dirt","ground","earth","grass","gravel","fine_gravel","sand","mud","compacted","dirt/sand"]);
+const pavedTag=t=>t.surface?!UNPAVED.has(String(t.surface).toLowerCase()):!(t.highway==="track"||t.highway==="path");
+function finishGraph(nodes, raw){      // plus grande composante connexe
+  const adj=nodes.map(()=>[]); raw.forEach(e=>{adj[e[0]].push(e[1]);adj[e[1]].push(e[0]);});
+  const seen=new Int8Array(nodes.length); let best=[];
+  for(let s=0;s<nodes.length;s++){ if(seen[s]) continue; const st=[s],c=[]; seen[s]=1;
+    while(st.length){const u=st.pop();c.push(u);for(const v of adj[u]) if(!seen[v]){seen[v]=1;st.push(v);}}
+    if(c.length>best.length) best=c; }
+  const mp=new Map(); best.forEach((o,i)=>mp.set(o,i)); const nn=best.map(o=>nodes[o]);
+  const E=raw.filter(e=>mp.has(e[0])&&mp.has(e[1])).map(e=>{const A=mp.get(e[0]),B=mp.get(e[1]);return {a:A,b:B,len:Math.hypot(nn[A][0]-nn[B][0],nn[A][1]-nn[B][1]),paved:e[2]};});
+  const nb=nn.map(()=>[]); E.forEach((e,i)=>{nb[e.a].push([e.b,i]);nb[e.b].push([e.a,i]);});
+  return {nodes:nn,E,nb};
+}
+function syntheticRoads(R,seed){
+  const r=rng(seed*977), B=110, k=Math.floor(R/B)+1, n=2*k+1, nodes=[], idx=new Int32Array(n*n).fill(-1);
+  for(let i=0;i<n;i++) for(let j=0;j<n;j++){const x=(i-k)*B+(r()-.5)*B*.1,y=(j-k)*B+(r()-.5)*B*.1; if(Math.hypot(x,y)<=R*1.05){idx[i*n+j]=nodes.length;nodes.push([x,y]);}}
+  const raw=[]; for(let i=0;i<n;i++) for(let j=0;j<n;j++){const a=i*n+j; if(idx[a]<0) continue;
+    for(const b of [j<n-1?a+1:-1,i<n-1?a+n:-1]) if(b>=0&&idx[b]>=0&&r()>.06){const p=nodes[idx[a]],q=nodes[idx[b]]; raw.push([idx[a],idx[b],Math.hypot((p[0]+q[0])/2,(p[1]+q[1])/2)<.75*R]);}}
+  return finishGraph(nodes,raw);
+}
+async function overpass(q){
+  let last; for(const u of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
+    try{const c=new AbortController(); const t=setTimeout(()=>c.abort(),30000);
+      const r=await fetch(u,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:c.signal}); clearTimeout(t);
+      if(!r.ok) throw new Error("HTTP "+r.status); return await r.json();}catch(e){last=e;} }
+  throw new Error("Overpass injoignable ("+(last&&last.message)+")");
+}
+function parseRoads(data){
+  const ll=new Map(), els=data.elements||[]; els.forEach(e=>{if(e.type==="node") ll.set(e.id,e);});
+  const idx=new Map(), nodes=[], raw=[];
+  els.forEach(w=>{ if(w.type!=="way"||!w.nodes) return; const pv=pavedTag(w.tags||{});
+    for(let i=0;i<w.nodes.length-1;i++){ const a=ll.get(w.nodes[i]), b=ll.get(w.nodes[i+1]); if(!a||!b) continue;
+      const ids=[a,b].map(p=>{ if(!idx.has(p.id)){idx.set(p.id,nodes.length);nodes.push(toXY(p.lat,p.lon));} return idx.get(p.id); }); raw.push([ids[0],ids[1],pv]); } });
+  if(!raw.length) throw new Error("aucune route dans la zone");
+  return finishGraph(nodes,raw);
+}
+function parseBuildings(data){ return (data.elements||[]).filter(e=>e.center).map(e=>toXY(e.center.lat,e.center.lon)); }
+const nearestNode=(g,p)=>{let bi=0,bd=1e18;for(let i=0;i<g.nodes.length;i++){const d=(g.nodes[i][0]-p[0])**2+(g.nodes[i][1]-p[1])**2;if(d<bd){bd=d;bi=i;}}return [bi,Math.sqrt(bd)];};
+
+/* ---------- Dijkstra (tas binaire) ---------- */
+function dijkstra(g, src){
+  const N=g.nodes.length, dist=new Float64Array(N).fill(Infinity), pe=new Int32Array(N).fill(-1), pn=new Int32Array(N).fill(-1);
+  const h=[[0,src]]; dist[src]=0;
+  const push=x=>{ h.push(x); let i=h.length-1; while(i>0){ const p=(i-1)>>1; if(h[p][0]<=h[i][0]) break; [h[p],h[i]]=[h[i],h[p]]; i=p; } };
+  const pop=()=>{ const t=h[0], l=h.pop(); if(h.length){ h[0]=l; let i=0; for(;;){ let a=2*i+1,b=a+1,m=i; if(a<h.length&&h[a][0]<h[m][0])m=a; if(b<h.length&&h[b][0]<h[m][0])m=b; if(m===i)break; [h[m],h[i]]=[h[i],h[m]]; i=m; } } return t; };
+  while(h.length){ const [d,u]=pop(); if(d>dist[u]) continue;
+    for(const [v,ei] of g.nb[u]){ const nd=d+g.E[ei].len; if(nd<dist[v]){ dist[v]=nd; pe[v]=ei; pn[v]=u; push([nd,v]); } } }
+  return {dist, pe, pn};
+}
+
+/* ---------- regroupement avec capacité ---------- */
+function capCluster(P, cap, r){
+  const n=P.length, k=Math.ceil(n/cap);
+  let C = Array.from({length:k}, ()=>P[Math.floor(r()*n)].slice()), lab = new Int32Array(n);
+  for(let it=0; it<5; it++){
+    const pairs=[]; for(let i=0;i<n;i++) for(let c=0;c<k;c++) pairs.push([(P[i][0]-C[c][0])**2+(P[i][1]-C[c][1])**2, i, c]);
+    pairs.sort((a,b)=>a[0]-b[0]); const cnt=new Int32Array(k), done=new Uint8Array(n); let left=n;
+    for(const [,i,c] of pairs){ if(done[i]||cnt[c]>=cap) continue; done[i]=1; cnt[c]++; lab[i]=c; if(--left===0) break; }
+    C = C.map((c,ci)=>{ let sx=0,sy=0,m=0; for(let i=0;i<n;i++) if(lab[i]===ci){sx+=P[i][0];sy+=P[i][1];m++;} return m?[sx/m,sy/m]:c; });
+  }
+  return {lab, C, k};
+}
+
+
+/* ---------- réseau FTTH ---------- */
+let NET=null;
+async function buildNetwork(){
+  const R=+$("R").value, seed=+$("S").value, cap=+$("cap").value, fn=+$("fdhn").value, st=$("status"); st.textContent="Calcul en cours…";
+  let g=null, homes=null, msg="";
+  if($("useOsm").checked){
+    try{
+      const around=`(around:${R},${CENTER.lat.toFixed(6)},${CENTER.lon.toFixed(6)})`;
+      g=parseRoads(await overpass(`[out:json][timeout:50];(way["highway"~"^(primary|secondary|tertiary|unclassified|residential|living_street|service|road|track)$"]${around};);(._;>;);out body qt;`));
+      let b=parseBuildings(await overpass(`[out:json][timeout:50];(way["building"]["building"!~"^(garage|garages|shed|roof|hut|carport|service|greenhouse|barn|farm_auxiliary|ruins)$"]${around};);out center;`)).filter(p=>Math.hypot(p[0],p[1])<=R);
+      if(b.length<2) throw new Error("aucun bâtiment dans la zone");
+      const r=rng(seed); if(b.length>2200){ b=b.map(p=>[r(),p]).sort((x,y)=>x[0]-y[0]).slice(0,2200).map(x=>x[1]); }
+      homes=b; msg=`OpenStreetMap : ${g.E.length} tronçons, ${homes.length} bâtiments.`;
+    }catch(e){ g=null; msg="OpenStreetMap indisponible ("+e.message+") : rues et foyers fictifs."; }
+  }
+  if(!g){ g=syntheticRoads(R,seed); const r=rng(seed*31+5), n=Math.min(2200,Math.round(Math.PI*(R/1000)**2*(+$("D").value))); homes=[];
+    while(homes.length<n){const x=(r()*2-1)*R,y=(r()*2-1)*R; if(Math.hypot(x,y)<=R) homes.push([x,y]);} }
+  const r=rng(seed*31+5);
+  const nap=capCluster(homes,cap,r), napNodes=nap.C.map(c=>nearestNode(g,c)[0]);
+  const fdh=capCluster(napNodes.map(i=>g.nodes[i]),fn,r), fdhNodes=fdh.C.map(c=>nearestNode(g,c)[0]);
+  const oltNode=nearestNode(g,[0,0])[0], used={feeder:new Uint8Array(g.E.length),dist:new Uint8Array(g.E.length),drop:new Uint8Array(g.E.length)};
+  const walk=(res,node,set)=>{while(res.pn[node]>=0){set[res.pe[node]]=1;node=res.pn[node];}};
+  const dOlt=dijkstra(g,oltNode); fdhNodes.forEach(f=>walk(dOlt,f,used.feeder)); const fdhLen=fdhNodes.map(f=>dOlt.dist[f]);
+  const napToFdh=new Float64Array(napNodes.length);
+  fdhNodes.forEach((f,fi)=>{const d=dijkstra(g,f); napNodes.forEach((nn,ni)=>{if(fdh.lab[ni]===fi){walk(d,nn,used.dist);napToFdh[ni]=d.dist[nn];}});});
+  const homeNode=homes.map(h=>nearestNode(g,h)), lateral=homeNode.map(x=>Math.min(x[1],20)); let worst=0;
+  napNodes.forEach((nn,ni)=>{const d=dijkstra(g,nn); homes.forEach((h,hi)=>{if(nap.lab[hi]!==ni) return; walk(d,homeNode[hi][0],used.drop);
+    const tot=d.dist[homeNode[hi][0]]+homeNode[hi][1]+napToFdh[ni]+fdhLen[fdh.lab[ni]]; if(tot>worst) worst=tot;});});
+  const lvl=new Int8Array(g.E.length).fill(-1), lens={feeder:[0,0],dist:[0,0],drop:[0,0]};
+  g.E.forEach((e,i)=>{const Lv=used.feeder[i]?"feeder":used.dist[i]?"dist":used.drop[i]?"drop":null; if(Lv){lvl[i]=LV.indexOf(Lv);lens[Lv][e.paved?0:1]+=e.len;}});
+  const lat=lateral.reduce((a,b)=>a+b,0); lens.drop[0]+=lat*.5; lens.drop[1]+=lat*.5;
+  NET={g,homes,napNodes,fdhNodes,oltNode,lvl,lens,nHomes:homes.length,nNap:napNodes.length,nFdh:fdhNodes.length,worstLen:worst,R,cap,fn,nap,fdh};
+  st.textContent=msg||"Rues et foyers fictifs."; draw(); compute();
+}
+/* ---------- métré et chiffrage ---------- */
+function compute(){
+  if(!NET) return;
+  const rock=+$("rock").value/100, aer=+$("aer").value/100, sw=[+$("sw0").value,+$("sw1").value,+$("sw2").value].map(x=>x/100);
+  const spacing=+$("chs").value, cross=+$("crs").value, cont=+$("cont").value/100, stud=+$("stud").value/100, over=.2;
+  const q = Object.fromEntries(DEF.map(d=>[d[0],0])), rows=[]; let trench=0, broken=0, brkRoad=0, brkWalk=0, vol=0;
+  LV.forEach((L,li)=>{
+    let [pv, un] = NET.lens[L], aerial=0;
+    if(L==="drop" && aer>0){ aerial=aer*(pv+un); pv*=1-aer; un*=1-aer; }
+    const len=pv+un, w=W[L], h=H[L], road=pv*(1-sw[li]), walk=pv*sw[li], bw=w+2*over;
+    const v=len*w*h, rk=v*rock, sand=len*w*.2, duct=len*DUCT[L]*Math.PI*.0275**2;
+    const chambers = L!=="drop" && len>0 ? Math.ceil(len/spacing) : 0, fore = L!=="drop" ? len/1000*cross*15 : 0;
+    q.demolition_chaussee+=road*bw; q.demolition_trottoir+=walk*bw; q.reprise_chaussee+=road*bw; q.reprise_trottoir+=walk*bw;
+    q.fouille_terrain+=v-rk; q.fouille_rocheuse+=rk; q.lit_sable+=sand; q.remblai+=Math.max(v-sand-duct,0); q.evacuation+=sand+duct;
+    q.conduit_pehd+=len*DUCT[L]; q.grillage+=len; q.forage_dirige+=fore; q.chambre_l2t+=chambers; q.signalisation+=len/1000;
+    if(aerial){ q.poteau+=Math.ceil(aerial/40); q.cable_aerien_pose+=aerial; }
+    trench+=len; vol+=v; brkRoad+=road*bw; brkWalk+=walk*bw;
+    rows.push({L, len, pv, un, aerial, road:road*bw, walk:walk*bw, v, chambers});
+  });
+  q.chambre_l1t+=NET.nNap; q.chambre_l2t+=NET.nFdh; broken=brkRoad+brkWalk;
+  const lines = DEF.filter(d=>q[d[0]]>1e-9).map(d=>({code:d[0], name:d[1], unit:d[2], qty:q[d[0]], pu:prices[d[0]], amt:q[d[0]]*prices[d[0]]}));
+  const sub = lines.reduce((a,b)=>a+b.amt,0), tot = sub*(1+cont+stud);
+  // budget optique : même modèle que le module Python (pire foyer)
+  const km=NET.worstLen/1000, splitDb=10*Math.log10(NET.fn)+10*Math.log10(NET.cap)+1.2, loss=km*.35+splitDb+1.5+(4+NET.worstLen/500)*.1, marge=28-loss;
+
+  $("kpis").innerHTML = [
+    ["Foyers", fmt(NET.nHomes), `${NET.nNap} NAP · ${NET.nFdh} FDH`],
+    ["Tranchée", fmt(trench/1000,1)+" km", `${fmt(rows.reduce((a,b)=>a+b.pv,0)/1000,1)} km revêtue`],
+    ["Surface cassée", fmt(broken/1000,1)+" k m²", `chaussée ${fmt(brkRoad/1000,1)} · trottoir ${fmt(brkWalk/1000,1)}`],
+    ["Génie civil", fmt(tot/1e6,2)+" M TND", `${fmt(tot/NET.nHomes)} TND/foyer · ${fmt(tot/Math.max(trench,1))} TND/m`]
+  ].map(k=>`<div class="kpi"><small>${k[0]}</small><strong>${k[1]}</strong><span>${k[2]}</span></div>`).join("");
+  $("optic").innerHTML = `Pire foyer : <b>${fmt(loss,1)} dB</b> de perte pour <b>${fmt(km,2)} km</b> de fibre. Marge GPON classe B+ (28 dB) : <span class="status ${marge>=0?"ok":"bad"}">${marge>=0?"+":""}${fmt(marge,1)} dB ${marge>=0?"(dans le budget)":"(hors budget : réduire le split ou passer en C+)"}</span>.`;
+  $("lvl").innerHTML = `<tr><th>Niveau</th><th>Tranchée (m)</th><th>Revêtue (m)</th><th>Terre (m)</th><th>Aérien (m)</th><th>Casse chaussée (m²)</th><th>Casse trottoir (m²)</th><th>Fouille (m³)</th><th>Chambres</th></tr>` +
+    rows.map(r=>`<tr><td>${LVN[r.L]}</td><td>${fmt(r.len)}</td><td>${fmt(r.pv)}</td><td>${fmt(r.un)}</td><td>${fmt(r.aerial)}</td><td>${fmt(r.road)}</td><td>${fmt(r.walk)}</td><td>${fmt(r.v)}</td><td>${r.chambers}</td></tr>`).join("");
+  const grp = {"Casses et réfection":["demolition_chaussee","demolition_trottoir","reprise_chaussee","reprise_trottoir"],
+    "Fouille et remblai":["fouille_terrain","fouille_rocheuse","lit_sable","remblai","evacuation"],
+    "Conduits et chambres":["conduit_pehd","grillage","chambre_l1t","chambre_l2t","forage_dirige","poteau","cable_aerien_pose"],
+    "Chantier":["signalisation"]};
+  const cols = ["var(--casse)","var(--terre)","var(--drop)","var(--muted)"], gl = Object.entries(grp).map(([n,c])=>[n, lines.filter(l=>c.includes(l.code)).reduce((a,b)=>a+b.amt,0)]);
+  $("bars").innerHTML = gl.map((g,i)=>`<div title="${g[0]} : ${fmt(g[1])} TND" style="flex:${Math.max(g[1],1)};background:${cols[i]}"></div>`).join("");
+  $("boq").innerHTML = `<tr><th>Désignation</th><th>Unité</th><th>Quantité</th><th>PU (TND)</th><th>Montant (TND)</th></tr>` +
+    lines.map(l=>`<tr><td>${l.name}</td><td>${l.unit}</td><td>${fmt(l.qty,1)}</td><td><input type="number" step="0.5" min="0" data-code="${l.code}" value="${l.pu}" aria-label="Prix unitaire ${l.name}"></td><td>${fmt(l.amt)}</td></tr>`).join("") +
+    `<tr><td colspan="4"><b>Sous-total</b></td><td><b>${fmt(sub)}</b></td></tr><tr><td colspan="4">Aléas ${fmt(cont*100)} %</td><td>${fmt(sub*cont)}</td></tr><tr><td colspan="4">Études et contrôle ${fmt(stud*100)} %</td><td>${fmt(sub*stud)}</td></tr><tr><td colspan="4"><b>Total génie civil</b></td><td><b>${fmt(tot)}</b></td></tr>`;
+  $("bars").insertAdjacentHTML("afterend", "");
+  document.querySelectorAll("#boq input").forEach(inp=>inp.addEventListener("change",()=>{ prices[inp.dataset.code]=Math.max(0,+inp.value||0); compute(); }));
+}
+
+
+/* ---------- dessin sur la carte ---------- */
+function draw(){
+  if(!NET) return; layer.clearLayers(); const {g}=NET, showC=$("showC").checked, col=["#f06595","#f2b134","#5ba8f0"], w=[5,3.5,2.2];
+  const ll=i=>toLL(g.nodes[i][0],g.nodes[i][1]), segs=(f)=>g.E.map((e,i)=>f(e,i)?[ll(e.a),ll(e.b)]:null).filter(Boolean);
+  L.polyline(segs(()=>true),{color:"#fff",weight:1,opacity:.25}).addTo(layer);
+  for(let lv=0;lv<3;lv++){
+    const paved=segs((e,i)=>NET.lvl[i]===lv&&e.paved), earth=segs((e,i)=>NET.lvl[i]===lv&&!e.paved);
+    if(earth.length) L.polyline(earth,{color:"#c49a6c",weight:w[lv],opacity:.95}).addTo(layer);
+    if(paved.length){ if(showC) L.polyline(paved,{color:"#ff3b3b",weight:w[lv]+3,opacity:.85}).addTo(layer); L.polyline(paved,{color:col[lv],weight:Math.max(w[lv]-1,1.5)}).addTo(layer); }
+  }
+  NET.homes.forEach(h=>L.circleMarker(toLL(h[0],h[1]),{radius:2,weight:0,fillColor:"#fff",fillOpacity:.9}).addTo(layer));
+  NET.napNodes.forEach((n,i)=>L.circleMarker(ll(n),{radius:5,color:"#fff",weight:1.2,fillColor:"#eb6834",fillOpacity:1}).bindTooltip("NAP "+(i+1)).addTo(layer));
+  NET.fdhNodes.forEach((n,i)=>L.circleMarker(ll(n),{radius:8,color:"#fff",weight:1.5,fillColor:"#7048e8",fillOpacity:1}).bindTooltip("FDH "+(i+1)).addTo(layer));
+  L.marker(ll(NET.oltNode)).bindTooltip("OLT").addTo(layer);
+  L.circle([CENTER.lat,CENTER.lon],{radius:NET.R,color:"#fff",weight:2,fill:false}).addTo(layer);
+}
+
+
+/* ---------- événements ---------- */
+const lab=(id,vid,f)=>{const u=()=>$(vid).textContent=f($(id).value);$(id).addEventListener("input",u);u();};
+lab("R","vR",v=>v+" m");lab("D","vD",v=>v);lab("S","vS",v=>v);lab("Rr","vRr",v=>v+" km");lab("pop","vpop",v=>v);lab("ms","vms",v=>v+" %");lab("gb","vgb",v=>v);
+["rock","aer","sw0","sw1","sw2"].forEach(i=>lab(i,"v"+i,v=>v+" %"));
+Object.keys(TECHS).forEach(t=>$("tech").add(new Option(t))); Object.keys(ENVS).forEach(t=>$("env").add(new Option(t,t))); Object.keys(COVS).forEach(t=>$("cov").add(new Option(t)));
+$("env").value="Urbain"; $("cov").value="Indoor léger"; $("tech").value="5G NR (3,5 GHz)";
+const setPop=()=>{$("pop").value=ENVS[$("env").value][1];$("vpop").textContent=$("pop").value;}, setGb=()=>{$("gb").value=TECHS[$("tech").value].gb;$("vgb").textContent=$("gb").value;};
+$("env").addEventListener("change",()=>{setPop();runRadio();}); $("tech").addEventListener("change",()=>{setGb();runRadio();}); setPop(); setGb();
+["cov","Rr","pop","ms","gb"].forEach(i=>$(i).addEventListener("change",runRadio)); $("goR").onclick=runRadio;
+function setMode(m){ mode=m; $("tR").setAttribute("aria-selected",m==="radio"); $("tF").setAttribute("aria-selected",m==="ftth");
+  document.querySelectorAll(".radio").forEach(e=>e.hidden=m!=="radio"); document.querySelectorAll(".ftth").forEach(e=>e.hidden=m!=="ftth");
+  if(m==="radio") runRadio(); else if(NET){ draw(); fitZone(NET.R); } else buildNetwork().then(()=>fitZone(NET.R)); map.invalidateSize(); }
+$("tR").onclick=()=>setMode("radio"); $("tF").onclick=()=>setMode("ftth");
+function recenter(la,lo){ CENTER={lat:la,lon:lo}; $("lat").value=la.toFixed(5); $("lon").value=lo.toFixed(5); NET=null; map.setView([la,lo],map.getZoom()); setMode(mode); }
+map.on("click",e=>{ if($("clk").checked) recenter(e.latlng.lat,e.latlng.lng); });
+["lat","lon"].forEach(i=>$(i).addEventListener("change",()=>{const la=+$("lat").value,lo=+$("lon").value; if(isFinite(la)&&isFinite(lo)) recenter(la,lo);}));
+$("gen").onclick=()=>buildNetwork().then(()=>fitZone(NET.R)); ["R","S","cap","fdhn","useOsm"].forEach(i=>$(i).addEventListener("change",()=>buildNetwork().then(()=>fitZone(NET.R))));
+["rock","aer","sw0","sw1","sw2","chs","crs","cont","stud"].forEach(i=>$(i).addEventListener("input",compute));
+$("showC").addEventListener("change",draw); $("reset").onclick=()=>{resetPrices();compute();};
+setMode("radio");
+</script></body></html>
